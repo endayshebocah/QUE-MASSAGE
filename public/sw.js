@@ -5,7 +5,7 @@
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/11.6.1/firebase-messaging-compat.js');
 
-const CACHE_NAME = 'que-massage-admin-v1';
+const CACHE_NAME = 'que-massage-admin-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -23,12 +23,10 @@ const firebaseConfig = {
   measurementId: "G-SQ06S21MK6"
 };
 
-// Inisialisasi Firebase & Messaging di dalam Service Worker
 try {
   firebase.initializeApp(firebaseConfig);
   const messaging = firebase.messaging();
 
-  // Menangani pesan notifikasi saat aplikasi ditutup / berjalan di latar belakang
   messaging.onBackgroundMessage((payload) => {
     const title = payload.notification?.title || 'QUE MASSAGE • Admin Panel';
     const options = {
@@ -37,63 +35,57 @@ try {
       badge: '/icons/icon-192x192.png',
       data: payload.data || { url: '/' }
     };
-
     self.registration.showNotification(title, options);
   });
 } catch (err) {
   console.warn('Inisialisasi Firebase Messaging SW dilewati:', err);
 }
 
-// =========================================================
-// EVENT LIFECYCLE PWA SERVICE WORKER
-// =========================================================
-
-// 1. Install: Menyimpan aset inti ke dalam cache
+// 1. Install: Simpan aset utama ke cache
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
   );
   self.skipWaiting();
 });
 
-// 2. Activate: Membersihkan cache versi lama
+// 2. Activate: Bersihkan cache versi lama
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
+    caches.keys().then((cacheNames) =>
+      Promise.all(
         cacheNames
           .filter((name) => name !== CACHE_NAME)
           .map((name) => caches.delete(name))
-      );
-    })
+      )
+    )
   );
   self.clients.claim();
 });
 
-// 3. Fetch: Network-first untuk halaman & fallback ke cache saat offline
+// 3. Fetch: Strategi Network-First dengan fallback ke cache offline
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
-  // Abaikan request API eksternal seperti Firestore/Google APIs
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        const responseClone = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
+        if (networkResponse && networkResponse.status === 200) {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+        }
         return networkResponse;
       })
-      .catch(() => caches.match(event.request))
+      .catch(() => caches.match(event.request).then((res) => res || caches.match('/index.html')))
   );
 });
 
-// 4. Notification Click: Membuka atau memfokuskan tab Admin Panel saat notifikasi diklik
+// 4. Notification Click: Fokuskan atau buka tab Admin Panel
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const targetUrl = event.notification.data?.url || '/';
